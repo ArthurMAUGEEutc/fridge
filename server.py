@@ -5,14 +5,51 @@ import urllib.request
 import urllib.error
 import http.server
 from urllib.parse import urlparse, parse_qs
-from datetime import datetime
+from datetime import datetime, date, timedelta
 
 # Add fridge dir to path for db import
 sys.path.insert(0, os.path.dirname(__file__))
 import db
 
+try:
+    from config import GEMINI_API_KEY
+except ImportError:
+    GEMINI_API_KEY = None
+
 PORT = 8000
 UPC_URL = "https://api.upcitemdb.com/prod/trial/lookup?upc={}"
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={}"
+
+
+# ── Gemini shelf-life ──────────────────────────────────────────────────────────
+
+def get_shelf_life(product_name: str) -> dict:
+    if not GEMINI_API_KEY or GEMINI_API_KEY == "YOUR_GEMINI_API_KEY_HERE":
+        return {"error": "no_api_key"}
+
+    prompt = (
+        f"Combien de jours après achat un produit alimentaire appelé '{product_name}' "
+        f"se conserve-t-il en moyenne au réfrigérateur ? "
+        f"Réponds UNIQUEMENT avec un entier, sans texte ni unité. Exemple: 7"
+    )
+    body = json.dumps({
+        "contents": [{"parts": [{"text": prompt}]}]
+    }).encode()
+    req = urllib.request.Request(
+        GEMINI_URL.format(GEMINI_API_KEY),
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST"
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            data = json.loads(r.read())
+        text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+        days = int("".join(filter(str.isdigit, text)))
+        suggested = (date.today() + timedelta(days=days)).isoformat()
+        return {"days": days, "suggested_expiry": suggested}
+    except Exception as e:
+        return {"error": str(e)}
 
 
 # ── UPCitemdb lookup ───────────────────────────────────────────────────────────
@@ -81,6 +118,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif path == "/alerts":
             db.refresh_statuses()
             self._json(200, db.get_alerts())
+
+        elif path == "/shelf-life":
+            name = qs.get("name", [""])[0]
+            if not name:
+                self._json(400, {"error": "missing name"})
+                return
+            self._json(200, get_shelf_life(name))
 
         else:
             self._send(404, "text/plain", b"Not found")

@@ -3,3 +3,4 @@ __pycache__/
 fridge.db
 cert.pem
 key.pem
+config.py

@@ -142,14 +142,39 @@
     <div id="lookupMsg" class="msg"></div>
     <div id="lookupErr" class="err" style="display:none;"></div>
 
-    <div>
-      <label>Date de péremption</label>
-      <input type="date" id="expiryInput">
+    <!-- Étape 2a : validation produit reconnu -->
+    <div id="stepValidate" style="display:none;flex-direction:column;gap:10px;">
+      <div style="font-size:13px;color:#94a3b8;">C'est bien ce produit ?</div>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-primary" style="flex:1;" onclick="onValidateYes()">✓ Oui</button>
+        <button class="btn btn-danger" style="flex:1;" onclick="onValidateNo()">✗ Non</button>
+      </div>
     </div>
 
-    <button class="btn btn-primary" onclick="addToFridge()" id="addBtn">
-      ➕ Ajouter au frigo
-    </button>
+    <!-- Étape 2b : date suggérée par le LLM -->
+    <div id="stepSuggest" style="display:none;flex-direction:column;gap:10px;">
+      <div id="suggestMsg" class="msg"></div>
+      <div>
+        <label>Date de péremption suggérée (modifiable)</label>
+        <input type="date" id="expiryInput">
+      </div>
+      <button class="btn btn-primary" onclick="addToFridge()">➕ Ajouter au frigo</button>
+    </div>
+
+    <!-- Étape 2c : saisie manuelle (produit non reconnu ou rejeté) -->
+    <div id="stepManual" style="display:none;flex-direction:column;gap:10px;">
+      <div style="font-size:13px;color:#f87171;">Produit non reconnu — saisis les infos manuellement.</div>
+      <div>
+        <label>Nom du produit</label>
+        <input type="text" id="manualName" placeholder="Ex: Yaourt nature">
+      </div>
+      <div>
+        <label>Date de péremption</label>
+        <input type="date" id="expiryInputManual">
+      </div>
+      <button class="btn btn-primary" onclick="addToFridgeManual()">➕ Ajouter au frigo</button>
+    </div>
+
     <div id="addResult" class="success" style="display:none;"></div>
   </div>
 
@@ -255,6 +280,21 @@
     } catch(e) {}
   }
 
+  // ── Helpers UI ────────────────────────────────────────────────────────────
+  function resetSteps() {
+    ["stepValidate","stepSuggest","stepManual"].forEach(id => {
+      document.getElementById(id).style.display = "none";
+    });
+    document.getElementById("addResult").style.display = "none";
+    document.getElementById("lookupErr").style.display = "none";
+    document.getElementById("lookupMsg").textContent = "";
+  }
+
+  function showStep(id) {
+    resetSteps();
+    document.getElementById(id).style.display = "flex";
+  }
+
   // ── Lookup ─────────────────────────────────────────────────────────────────
   async function triggerLookup(barcode) {
     currentBarcode = barcode;
@@ -262,33 +302,25 @@
 
     const card = document.getElementById("addCard");
     const preview = document.getElementById("productPreview");
-    const msg = document.getElementById("lookupMsg");
-    const err = document.getElementById("lookupErr");
-    const addResult = document.getElementById("addResult");
 
     card.style.display = "flex";
     preview.classList.remove("show");
-    msg.textContent = "Recherche du produit…";
-    err.style.display = "none";
-    addResult.style.display = "none";
+    resetSteps();
+    document.getElementById("lookupMsg").textContent = "Recherche du produit…";
     document.getElementById("previewBarcode").textContent = barcode;
-    document.getElementById("expiryInput").value = "";
 
     try {
       const res = await fetch(`/lookup?upc=${barcode}`);
       const data = await res.json();
+      document.getElementById("lookupMsg").textContent = "";
 
       if (data.error) {
-        msg.textContent = "Produit inconnu — remplis le nom manuellement.";
-        document.getElementById("previewName").textContent = "Produit inconnu";
-        document.getElementById("previewBrand").textContent = "";
-        document.getElementById("previewImg").src = "";
-        preview.classList.add("show");
-        currentProduct = { barcode, name: "Produit inconnu", brand: "", image_url: "" };
+        // Produit non reconnu → saisie manuelle directe
+        showStep("stepManual");
         return;
       }
 
-      msg.textContent = "";
+      // Produit reconnu → afficher + demander validation
       document.getElementById("previewName").textContent = data.name;
       document.getElementById("previewBrand").textContent = data.brand;
       const img = document.getElementById("previewImg");
@@ -296,17 +328,49 @@
       img.style.display = data.image_url ? "block" : "none";
       preview.classList.add("show");
       currentProduct = data;
+      showStep("stepValidate");
 
     } catch(e) {
-      msg.textContent = "";
-      err.textContent = "Serveur inaccessible.";
-      err.style.display = "block";
+      document.getElementById("lookupErr").textContent = "Serveur inaccessible.";
+      document.getElementById("lookupErr").style.display = "block";
+      document.getElementById("lookupMsg").textContent = "";
     }
   }
 
   function manualLookup() {
     const val = document.getElementById("manualBarcode").value.trim();
     if (val) triggerLookup(val);
+  }
+
+  // ── Validation ─────────────────────────────────────────────────────────────
+  async function onValidateYes() {
+    // Produit confirmé → appel shelf-life Gemini
+    showStep("stepSuggest");
+    const suggestMsg = document.getElementById("suggestMsg");
+    suggestMsg.textContent = "Calcul de la date de conservation…";
+    document.getElementById("expiryInput").value = "";
+
+    try {
+      const res = await fetch(`/shelf-life?name=${encodeURIComponent(currentProduct.name)}`);
+      const data = await res.json();
+
+      if (data.error === "no_api_key") {
+        suggestMsg.textContent = "⚠ Clé Gemini non configurée — saisis la date manuellement.";
+      } else if (data.error) {
+        suggestMsg.textContent = "Impossible d'estimer la durée — saisis la date manuellement.";
+      } else {
+        suggestMsg.textContent = `💡 Conservation estimée : ${data.days} jours après achat.`;
+        document.getElementById("expiryInput").value = data.suggested_expiry;
+      }
+    } catch(e) {
+      suggestMsg.textContent = "Erreur — saisis la date manuellement.";
+    }
+  }
+
+  function onValidateNo() {
+    // Produit rejeté → saisie manuelle
+    currentProduct = null;
+    showStep("stepManual");
   }
 
   // ── Add to fridge ──────────────────────────────────────────────────────────
@@ -351,6 +415,46 @@
       result.textContent = "Erreur réseau.";
       result.className = "err";
       result.style.display = "block";
+    }
+  }
+
+  async function addToFridgeManual() {
+    const name   = document.getElementById("manualName").value.trim();
+    const expiry = document.getElementById("expiryInputManual").value;
+    const result = document.getElementById("addResult");
+
+    if (!name) {
+      result.textContent = "⚠ Remplis le nom du produit.";
+      result.className = "err"; result.style.display = "block"; return;
+    }
+    if (!expiry) {
+      result.textContent = "⚠ Remplis la date de péremption.";
+      result.className = "err"; result.style.display = "block"; return;
+    }
+
+    const body = {
+      barcode: currentBarcode || ("manual-" + Date.now()),
+      name, brand: "", image_url: "", expiry_date: expiry,
+    };
+    try {
+      const res = await fetch("/product", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (res.ok) {
+        result.textContent = "✓ Produit ajouté au frigo !";
+        result.className = "success"; result.style.display = "block";
+        document.getElementById("manualName").value = "";
+        document.getElementById("expiryInputManual").value = "";
+        checkAlertBanner();
+      } else {
+        const d = await res.json();
+        result.textContent = "Erreur : " + (d.error || res.status);
+        result.className = "err"; result.style.display = "block";
+      }
+    } catch(e) {
+      result.textContent = "Erreur réseau.";
+      result.className = "err"; result.style.display = "block";
     }
   }
 
