@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FridgeTracker</title>
+  <script src="https://unpkg.com/@zxing/library@latest/umd/index.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; -webkit-tap-highlight-color: transparent; }
+    body { background: #0b0f19; color: #f1f5f9; min-height: 100vh; display: flex; flex-direction: column; }
+
+    /* Nav */
+    nav { display: flex; background: #1e293b; border-bottom: 1px solid rgba(255,255,255,.08); }
+    nav button { flex: 1; padding: 14px 0; background: none; border: none; color: #64748b; font-size: 13px; font-weight: 600; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 4px; transition: color .15s; }
+    nav button.active { color: #38bdf8; border-bottom: 2px solid #38bdf8; }
+    nav button svg { width: 20px; height: 20px; }
+
+    /* Alert banner */
+    #alertBanner { display: none; background: #7f1d1d; color: #fca5a5; padding: 10px 16px; font-size: 13px; font-weight: 600; text-align: center; }
+    #alertBanner.show { display: block; }
+
+    /* Views */
+    .view { display: none; flex: 1; flex-direction: column; padding: 16px; gap: 16px; max-width: 500px; width: 100%; margin: 0 auto; }
+    .view.active { display: flex; }
+
+    /* Cards */
+    .card { background: #1e293b; border-radius: 16px; padding: 18px; border: 1px solid rgba(255,255,255,.08); display: flex; flex-direction: column; gap: 12px; }
+    .card-title { font-size: 12px; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: .6px; }
+
+    /* Scanner */
+    .scanner-box { position: relative; width: 100%; aspect-ratio: 4/3; background: #0f172a; border-radius: 14px; overflow: hidden; }
+    video { width: 100%; height: 100%; object-fit: cover; }
+    .overlay { position: absolute; inset: 0; pointer-events: none; display: flex; align-items: center; justify-content: center; }
+    .reticle { width: 70%; height: 50%; border-radius: 10px; position: relative; box-shadow: 0 0 0 9999px rgba(11,15,25,.6); }
+    .corner { position: absolute; width: 22px; height: 22px; border-color: #38bdf8; border-style: solid; transition: border-color .2s; }
+    .tl{top:-2px;left:-2px;border-width:3px 0 0 3px;border-top-left-radius:6px}
+    .tr{top:-2px;right:-2px;border-width:3px 3px 0 0;border-top-right-radius:6px}
+    .bl{bottom:-2px;left:-2px;border-width:0 0 3px 3px;border-bottom-left-radius:6px}
+    .br{bottom:-2px;right:-2px;border-width:0 3px 3px 0;border-bottom-right-radius:6px}
+    .scan-line { position: absolute; left:5%; width:90%; height:2px; background: linear-gradient(90deg,transparent,#38bdf8,#00f2fe,#38bdf8,transparent); box-shadow: 0 0 10px 2px rgba(56,189,248,.7); animation: scanAnim 2s infinite ease-in-out; }
+    @keyframes scanAnim { 0%,100%{top:8%} 50%{top:88%} }
+    .reticle.ok .corner { border-color: #10b981; }
+
+    /* Product preview */
+    .product-preview { display: none; flex-direction: row; gap: 12px; align-items: flex-start; }
+    .product-preview.show { display: flex; }
+    .product-preview img { width: 64px; height: 64px; object-fit: contain; border-radius: 8px; background: #0f172a; }
+    .product-preview .info { flex: 1; }
+    .product-preview .pname { font-weight: 700; font-size: 15px; margin-bottom: 2px; }
+    .product-preview .pbrand { color: #94a3b8; font-size: 12px; }
+
+    /* Form */
+    label { font-size: 12px; color: #94a3b8; margin-bottom: 4px; display: block; }
+    input[type=date], input[type=text] { width: 100%; background: #0f172a; border: 1px solid rgba(255,255,255,.1); border-radius: 10px; padding: 10px 14px; color: white; font-size: 15px; outline: none; }
+    input[type=date]:focus, input[type=text]:focus { border-color: #38bdf8; }
+    input[type=date]::-webkit-calendar-picker-indicator { filter: invert(1); }
+
+    /* Buttons */
+    .btn { padding: 12px 20px; border-radius: 12px; font-size: 14px; font-weight: 700; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 46px; transition: opacity .15s; }
+    .btn:active { opacity: .8; }
+    .btn-primary { background: linear-gradient(135deg,#3b82f6,#2563eb); color: white; width: 100%; }
+    .btn-secondary { background: rgba(51,65,85,.8); color: #e2e8f0; border: 1px solid rgba(255,255,255,.08); flex: 1; }
+    .btn-danger { background: rgba(127,29,29,.6); color: #fca5a5; border: 1px solid rgba(252,165,165,.2); flex: 1; }
+    .btn-sm { padding: 6px 12px; font-size: 12px; min-height: 32px; border-radius: 8px; }
+    .btn-disabled { opacity: .4; cursor: not-allowed; }
+
+    /* Product list */
+    .product-item { display: flex; gap: 12px; align-items: center; padding: 12px; background: #0f172a; border-radius: 12px; border-left: 3px solid transparent; }
+    .product-item.ok { border-color: #10b981; }
+    .product-item.expiring_soon { border-color: #f59e0b; }
+    .product-item.expired { border-color: #ef4444; }
+    .product-item.thrown { border-color: #475569; opacity: .5; }
+    .product-item img { width: 44px; height: 44px; object-fit: contain; border-radius: 6px; background: #1e293b; }
+    .product-item .meta { flex: 1; min-width: 0; }
+    .product-item .iname { font-weight: 700; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .product-item .idate { font-size: 11px; color: #94a3b8; margin-top: 2px; }
+    .product-item .ibadge { font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px; margin-top: 3px; display: inline-block; }
+    .badge-ok { background: rgba(16,185,129,.15); color: #10b981; }
+    .badge-expiring_soon { background: rgba(245,158,11,.15); color: #f59e0b; }
+    .badge-expired { background: rgba(239,68,68,.15); color: #ef4444; }
+    .badge-thrown { background: rgba(71,85,105,.15); color: #64748b; }
+    .item-actions { display: flex; gap: 6px; }
+
+    /* Info / error */
+    .msg { font-size: 13px; color: #94a3b8; text-align: center; padding: 8px 0; }
+    .err { color: #f87171; font-size: 13px; }
+    .success { color: #10b981; font-size: 13px; }
+
+    /* Status bar */
+    .status-bar { font-size: 12px; color: #64748b; display: flex; align-items: center; gap: 6px; }
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: #10b981; box-shadow: 0 0 6px #10b981; }
+  </style>
+</head>
+<body>
+
+<div id="alertBanner"></div>
+
+<nav>
+  <button class="active" onclick="showView('scan')" id="tab-scan">
+    <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="5" height="5" rx="1"/><rect x="16" y="3" width="5" height="5" rx="1"/><rect x="3" y="16" width="5" height="5" rx="1"/><path d="M16 16h5v5h-5z" opacity=".4"/><path d="M11 3v18M3 11h18"/></svg>
+    Scanner
+  </button>
+  <button onclick="showView('fridge')" id="tab-fridge">
+    <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M5 10h14"/><path d="M9 6v2M9 14v4"/></svg>
+    Mon Frigo
+  </button>
+  <button onclick="showView('alerts')" id="tab-alerts">
+    <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+    Alertes
+  </button>
+</nav>
+
+<!-- ── VUE 1 : Scanner ──────────────────────────────────────────────── -->
+<div class="view active" id="view-scan">
+
+  <div class="card">
+    <div class="status-bar"><div class="dot"></div><span id="camStatus">Démarrage caméra…</span></div>
+    <div class="scanner-box">
+      <video id="video" playsinline muted></video>
+      <div class="overlay">
+        <div class="reticle" id="reticle">
+          <div class="corner tl"></div><div class="corner tr"></div>
+          <div class="corner bl"></div><div class="corner br"></div>
+          <div class="scan-line"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" id="addCard" style="display:none;">
+    <div class="card-title">Produit détecté</div>
+
+    <div class="product-preview" id="productPreview">
+      <img id="previewImg" src="" alt="">
+      <div class="info">
+        <div class="pname" id="previewName">—</div>
+        <div class="pbrand" id="previewBrand"></div>
+        <div style="font-family:monospace;font-size:11px;color:#475569;margin-top:4px;" id="previewBarcode"></div>
+      </div>
+    </div>
+
+    <div id="lookupMsg" class="msg"></div>
+    <div id="lookupErr" class="err" style="display:none;"></div>
+
+    <div>
+      <label>Date de péremption</label>
+      <input type="date" id="expiryInput">
+    </div>
+
+    <button class="btn btn-primary" onclick="addToFridge()" id="addBtn">
+      ➕ Ajouter au frigo
+    </button>
+    <div id="addResult" class="success" style="display:none;"></div>
+  </div>
+
+  <!-- Saisie manuelle -->
+  <div class="card">
+    <div class="card-title">Saisie manuelle</div>
+    <div style="display:flex;gap:8px;">
+      <input type="text" id="manualBarcode" placeholder="Ex: 3017620422003" style="flex:1;">
+      <button class="btn btn-secondary btn-sm" onclick="manualLookup()">Chercher</button>
+    </div>
+  </div>
+
+</div>
+
+<!-- ── VUE 2 : Mon Frigo ────────────────────────────────────────────── -->
+<div class="view" id="view-fridge">
+  <div style="display:flex;justify-content:space-between;align-items:center;">
+    <span style="font-size:18px;font-weight:700;">Mon Frigo</span>
+    <span id="fridgeCount" style="font-size:12px;color:#64748b;"></span>
+  </div>
+  <div id="fridgeList" style="display:flex;flex-direction:column;gap:8px;">
+    <div class="msg">Chargement…</div>
+  </div>
+</div>
+
+<!-- ── VUE 3 : Alertes ──────────────────────────────────────────────── -->
+<div class="view" id="view-alerts">
+  <div style="font-size:18px;font-weight:700;">Alertes</div>
+  <div id="alertsList" style="display:flex;flex-direction:column;gap:8px;">
+    <div class="msg">Chargement…</div>
+  </div>
+</div>
+
+<script>
+  // ── State ──────────────────────────────────────────────────────────────────
+  let codeReader = null, isScanning = true, cooldown = false;
+  let currentBarcode = null, currentProduct = null;
+
+  const BADGE = {
+    ok: ["badge-ok", "✓ OK"],
+    expiring_soon: ["badge-expiring_soon", "⚠ Bientôt périmé"],
+    expired: ["badge-expired", "✗ Périmé"],
+    thrown: ["badge-thrown", "Jeté"],
+  };
+
+  // ── Nav ────────────────────────────────────────────────────────────────────
+  function showView(name) {
+    document.querySelectorAll(".view").forEach(v => v.classList.remove("active"));
+    document.querySelectorAll("nav button").forEach(b => b.classList.remove("active"));
+    document.getElementById("view-" + name).classList.add("active");
+    document.getElementById("tab-" + name).classList.add("active");
+    if (name === "fridge") loadFridge();
+    if (name === "alerts") loadAlerts();
+  }
+
+  // ── Scanner ────────────────────────────────────────────────────────────────
+  document.addEventListener("DOMContentLoaded", () => {
+    if (typeof ZXing !== "undefined") {
+      codeReader = new ZXing.BrowserMultiFormatReader();
+      startScanner();
+    } else {
+      document.getElementById("camStatus").textContent = "ZXing manquant";
+    }
+    checkAlertBanner();
+  });
+
+  function startScanner() {
+    if (!codeReader) return;
+    codeReader.listVideoInputDevices().then(devices => {
+      const rear = devices.find(d => /back|environment|rear/i.test(d.label));
+      const id = rear ? rear.deviceId : (devices[0] && devices[0].deviceId);
+      codeReader.decodeFromVideoDevice(id, "video", (result) => {
+        if (result && isScanning) onScan(result.getText());
+      });
+      document.getElementById("camStatus").textContent = "Caméra active";
+    }).catch(() => {
+      document.getElementById("camStatus").textContent = "Erreur caméra";
+    });
+  }
+
+  function onScan(barcode) {
+    if (cooldown) return;
+    cooldown = true;
+    setTimeout(() => { cooldown = false; }, 2000);
+
+    const r = document.getElementById("reticle");
+    r.classList.add("ok");
+    setTimeout(() => r.classList.remove("ok"), 600);
+
+    playBeep();
+    triggerLookup(barcode);
+  }
+
+  function playBeep() {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = ctx.createOscillator(), gain = ctx.createGain();
+      osc.frequency.setValueAtTime(1200, ctx.currentTime);
+      gain.gain.setValueAtTime(0.15, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.12);
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.start(); osc.stop(ctx.currentTime + 0.12);
+    } catch(e) {}
+  }
+
+  // ── Lookup ─────────────────────────────────────────────────────────────────
+  async function triggerLookup(barcode) {
+    currentBarcode = barcode;
+    currentProduct = null;
+
+    const card = document.getElementById("addCard");
+    const preview = document.getElementById("productPreview");
+    const msg = document.getElementById("lookupMsg");
+    const err = document.getElementById("lookupErr");
+    const addResult = document.getElementById("addResult");
+
+    card.style.display = "flex";
+    preview.classList.remove("show");
+    msg.textContent = "Recherche du produit…";
+    err.style.display = "none";
+    addResult.style.display = "none";
+    document.getElementById("previewBarcode").textContent = barcode;
+    document.getElementById("expiryInput").value = "";
+
+    try {
+      const res = await fetch(`/lookup?upc=${barcode}`);
+      const data = await res.json();
+
+      if (data.error) {
+        msg.textContent = "Produit inconnu — remplis le nom manuellement.";
+        document.getElementById("previewName").textContent = "Produit inconnu";
+        document.getElementById("previewBrand").textContent = "";
+        document.getElementById("previewImg").src = "";
+        preview.classList.add("show");
+        currentProduct = { barcode, name: "Produit inconnu", brand: "", image_url: "" };
+        return;
+      }
+
+      msg.textContent = "";
+      document.getElementById("previewName").textContent = data.name;
+      document.getElementById("previewBrand").textContent = data.brand;
+      const img = document.getElementById("previewImg");
+      img.src = data.image_url || "";
+      img.style.display = data.image_url ? "block" : "none";
+      preview.classList.add("show");
+      currentProduct = data;
+
+    } catch(e) {
+      msg.textContent = "";
+      err.textContent = "Serveur inaccessible.";
+      err.style.display = "block";
+    }
+  }
+
+  function manualLookup() {
+    const val = document.getElementById("manualBarcode").value.trim();
+    if (val) triggerLookup(val);
+  }
+
+  // ── Add to fridge ──────────────────────────────────────────────────────────
+  async function addToFridge() {
+    const expiry = document.getElementById("expiryInput").value;
+    const result = document.getElementById("addResult");
+
+    if (!currentBarcode) { return; }
+    if (!expiry) {
+      result.textContent = "⚠ Remplis la date de péremption.";
+      result.className = "err";
+      result.style.display = "block";
+      return;
+    }
+
+    const body = {
+      barcode: currentBarcode,
+      name: currentProduct?.name || "Inconnu",
+      brand: currentProduct?.brand || "",
+      image_url: currentProduct?.image_url || "",
+      expiry_date: expiry,
+    };
+
+    try {
+      const res = await fetch("/product", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (res.ok) {
+        result.textContent = "✓ Produit ajouté au frigo !";
+        result.className = "success";
+        result.style.display = "block";
+        checkAlertBanner();
+      } else {
+        const d = await res.json();
+        result.textContent = "Erreur : " + (d.error || res.status);
+        result.className = "err";
+        result.style.display = "block";
+      }
+    } catch(e) {
+      result.textContent = "Erreur réseau.";
+      result.className = "err";
+      result.style.display = "block";
+    }
+  }
+
+  // ── Fridge list ────────────────────────────────────────────────────────────
+  async function loadFridge() {
+    const list = document.getElementById("fridgeList");
+    list.innerHTML = '<div class="msg">Chargement…</div>';
+    try {
+      const res = await fetch("/products");
+      const products = await res.json();
+      document.getElementById("fridgeCount").textContent = `${products.length} produit${products.length > 1 ? "s" : ""}`;
+
+      if (products.length === 0) {
+        list.innerHTML = '<div class="msg">Frigo vide — scanne un produit !</div>';
+        return;
+      }
+      list.innerHTML = products.map(p => productCard(p)).join("");
+    } catch(e) {
+      list.innerHTML = '<div class="err">Impossible de charger.</div>';
+    }
+  }
+
+  function productCard(p) {
+    const [bClass, bLabel] = BADGE[p.status] || BADGE.ok;
+    const daysLeft = p.expiry_date ? daysUntil(p.expiry_date) : null;
+    const dateStr = p.expiry_date
+      ? `Périme le ${p.expiry_date}${daysLeft !== null ? ` (${daysLeft >= 0 ? "dans " + daysLeft + "j" : "il y a " + Math.abs(daysLeft) + "j"})` : ""}`
+      : "Pas de date";
+    const opened = p.opened_at ? `· Ouvert le ${p.opened_at.split("T")[0]}` : "";
+    const img = p.image_url
+      ? `<img src="${p.image_url}" alt="" onerror="this.style.display='none'">`
+      : `<div style="width:44px;height:44px;background:#1e293b;border-radius:6px;"></div>`;
+    const actions = p.status !== "thrown"
+      ? `<div class="item-actions">
+           ${!p.opened_at ? `<button class="btn btn-secondary btn-sm" onclick="markOpened('${p.barcode}')">Ouvert</button>` : ""}
+           <button class="btn btn-danger btn-sm" onclick="markThrown('${p.barcode}')">Jeté</button>
+         </div>`
+      : `<div style="font-size:11px;color:#475569;">Jeté le ${(p.thrown_at||"").split("T")[0]}</div>`;
+
+    return `<div class="product-item ${p.status}" id="item-${p.barcode}">
+      ${img}
+      <div class="meta">
+        <div class="iname">${p.name}</div>
+        <div class="idate">${dateStr} ${opened}</div>
+        <span class="ibadge ${bClass}">${bLabel}</span>
+      </div>
+      ${actions}
+    </div>`;
+  }
+
+  function daysUntil(dateStr) {
+    const today = new Date(); today.setHours(0,0,0,0);
+    const target = new Date(dateStr);
+    return Math.round((target - today) / 86400000);
+  }
+
+  async function markOpened(barcode) {
+    await fetch(`/product/${barcode}/open`, { method: "POST" });
+    loadFridge();
+  }
+
+  async function markThrown(barcode) {
+    await fetch(`/product/${barcode}/throw`, { method: "POST" });
+    loadFridge();
+    checkAlertBanner();
+  }
+
+  // ── Alerts ─────────────────────────────────────────────────────────────────
+  async function loadAlerts() {
+    const list = document.getElementById("alertsList");
+    list.innerHTML = '<div class="msg">Chargement…</div>';
+    try {
+      const res = await fetch("/alerts");
+      const alerts = await res.json();
+      if (alerts.length === 0) {
+        list.innerHTML = '<div class="msg" style="color:#10b981;">✓ Aucune alerte — tout est frais !</div>';
+        return;
+      }
+      list.innerHTML = alerts.map(p => productCard(p)).join("");
+    } catch(e) {
+      list.innerHTML = '<div class="err">Impossible de charger.</div>';
+    }
+  }
+
+  async function checkAlertBanner() {
+    try {
+      const res = await fetch("/alerts");
+      const alerts = await res.json();
+      const banner = document.getElementById("alertBanner");
+      if (alerts.length > 0) {
+        banner.textContent = `⚠ ${alerts.length} produit${alerts.length > 1 ? "s" : ""} bientôt périmé${alerts.length > 1 ? "s" : ""} !`;
+        banner.classList.add("show");
+        document.getElementById("tab-alerts").style.color = "#f87171";
+      } else {
+        banner.classList.remove("show");
+        document.getElementById("tab-alerts").style.color = "";
+      }
+    } catch(e) {}
+  }
+
+  // Refresh alertes toutes les 60s
+  setInterval(checkAlertBanner, 60000);
+</script>
+</body>
+</html>
