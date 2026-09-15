@@ -2,7 +2,7 @@ import sqlite3
 import os
 from datetime import date, datetime, timedelta
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "fridge.db")
+DB_PATH = os.environ.get("DB_PATH", os.path.join(os.path.dirname(__file__), "fridge.db"))
 
 
 def connect():
