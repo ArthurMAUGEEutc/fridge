@@ -23,7 +23,7 @@ if not GEMINI_API_KEY:
 API_KEY = os.environ.get("FRIDGE_API_KEY")  # key for /api/status
 
 PORT = int(os.environ.get("PORT", 8000))
-UPC_URL = "https://api.upcitemdb.com/prod/trial/lookup?upc={}"
+OFF_URL = "https://world.openfoodfacts.org/api/v2/product/{}.json?fields=product_name,brands,image_url"
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key={}"
 
 
@@ -72,8 +72,8 @@ def get_shelf_life(product_name: str) -> dict:
 
 def lookup(barcode: str) -> dict:
     req = urllib.request.Request(
-        UPC_URL.format(barcode),
-        headers={"Accept": "application/json"}
+        OFF_URL.format(barcode),
+        headers={"User-Agent": "FridgeTracker/1.0"}
     )
     try:
         with urllib.request.urlopen(req, timeout=10) as r:
@@ -83,17 +83,15 @@ def lookup(barcode: str) -> dict:
     except urllib.error.URLError as e:
         return {"error": str(e.reason)}
 
-    items = data.get("items", [])
-    if not items:
+    if data.get("status") != 1:
         return {"error": "not found"}
 
-    p = items[0]
+    p = data.get("product", {})
     return {
         "barcode": barcode,
-        "name": p.get("title") or "Unknown",
-        "brand": p.get("brand") or "",
-        "image_url": (p.get("images") or [""])[0],
-        "lowest_price": p.get("lowest_recorded_price"),
+        "name": p.get("product_name") or "Unknown",
+        "brand": p.get("brands") or "",
+        "image_url": p.get("image_url") or "",
     }
 
 
