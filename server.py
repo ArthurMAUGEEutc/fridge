@@ -24,7 +24,7 @@ API_KEY = os.environ.get("FRIDGE_API_KEY")  # key for /api/status
 
 PORT = int(os.environ.get("PORT", 8000))
 UPC_URL = "https://api.upcitemdb.com/prod/trial/lookup?upc={}"
-GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key={}"
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key={}"
 
 
 # ── Gemini shelf-life ──────────────────────────────────────────────────────────
@@ -34,9 +34,11 @@ def get_shelf_life(product_name: str) -> dict:
         return {"error": "no_api_key"}
 
     prompt = (
-        f"Combien de jours après achat un produit alimentaire appelé '{product_name}' "
-        f"se conserve-t-il en moyenne au réfrigérateur ? "
-        f"Réponds UNIQUEMENT avec un entier, sans texte ni unité. Exemple: 7"
+        f"You are a food safety expert. How many days after purchase can '{product_name}' "
+        f"typically be kept in a refrigerator before it should be consumed or discarded? "
+        f"Consider an unopened product stored at standard fridge temperature (4°C / 39°F). "
+        f"If the product is shelf-stable or non-perishable, give a reasonable estimate assuming it is opened and refrigerated. "
+        f"Reply with a SINGLE integer (number of days) and absolutely nothing else. No units, no explanation. Example: 7"
     )
     body = json.dumps({
         "contents": [{"parts": [{"text": prompt}]}]
@@ -48,7 +50,7 @@ def get_shelf_life(product_name: str) -> dict:
         method="POST"
     )
     try:
-        with urllib.request.urlopen(req, timeout=10) as r:
+        with urllib.request.urlopen(req, timeout=30) as r:
             raw = r.read()
         print(f"[Gemini] status=200 body={raw[:500]}")
         data = json.loads(raw)
