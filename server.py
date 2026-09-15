@@ -24,7 +24,7 @@ API_KEY = os.environ.get("FRIDGE_API_KEY")  # key for /api/status
 
 PORT = int(os.environ.get("PORT", 8000))
 UPC_URL = "https://api.upcitemdb.com/prod/trial/lookup?upc={}"
-GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key={}"
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key={}"
 
 
 # ── Gemini shelf-life ──────────────────────────────────────────────────────────

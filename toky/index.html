@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TokyMaker Web App</title>
+  <!-- Shared phone-sensor + hybrid-TTS module: use window.TokySensors.* instead of raw APIs -->
+  <script src="https://create.dev.tokylabs.com/v5/static/js/toky-sensors.js?v=110"></script>
+</head>
+<body style="font-family: system-ui, -apple-system, sans-serif; background-color: #f8fafc; margin: 0; padding: 20px; color: #1e293b;">
+
+<!-- env.js loads your API key as window.TOKY_ENV.API_KEY
+     This file is local-only and never included in the HTML.
+     Use window.TOKY_ENV.API_KEY in your code to access it. -->
+<script src="env.js"></script>
+
+<script>
+window.TOKYMAKER_WEBAPP_MANIFEST = {
+  send:    [],
+  receive: [
+    {"name":"products","type":"Number","typeKey":"1"},
+    {"name":"alerts",  "type":"Number","typeKey":"1"}
+  ]
+};
+class TokyBridge {
+  constructor() {
+    this.onDataReceived = function(packet) {};
+    this._channel = new BroadcastChannel('tokymaker-webapp');
+    var self = this;
+    this._channel.onmessage = function(e) {
+      if (e.data && e.data.type === 'data') {
+        try { self.onDataReceived({ name: e.data.name, value: e.data.value, varType: e.data.varType }); }
+        catch(_) {}
+      }
+    };
+    this.manifest = window.TOKYMAKER_WEBAPP_MANIFEST;
+  }
+  send(name, value) {
+    var slotId = -1;
+    var rcv = this.manifest.receive;
+    for (var i = 0; i < rcv.length; i++) {
+      if (rcv[i].name === name) { slotId = i; break; }
+    }
+    this._channel.postMessage({ type: 'send', name: name, value: value, slotId: slotId });
+  }
+}
+const toky = new TokyBridge();
+</script>
+
+<div id="tkControls" style="display:flex;flex-wrap:wrap;gap:16px;padding:0 0 20px 0;">
+  <div style="border:1px solid #ddd;border-radius:10px;padding:18px 28px;min-width:200px;text-align:center;box-shadow:0 2px 6px rgba(0,0,0,.08);background:#fff;">
+    <div style="font-size:12px;color:#888;margin-bottom:6px;">products <span style="color:#bbb;">(Number)</span></div>
+    <input type="range" id="tkc_products" min="0" max="100" value="0" oninput="toky.send('products', Number(this.value))" style="width:160px;">
+  </div>
+  <div style="border:1px solid #ddd;border-radius:10px;padding:18px 28px;min-width:200px;text-align:center;box-shadow:0 2px 6px rgba(0,0,0,.08);background:#fff;">
+    <div style="font-size:12px;color:#888;margin-bottom:6px;">alerts <span style="color:#bbb;">(Number)</span></div>
+    <input type="range" id="tkc_alerts" min="0" max="100" value="0" oninput="toky.send('alerts', Number(this.value))" style="width:160px;">
+  </div>
+</div>
+
+<div style="max-width: 440px; margin: 0 auto; background: #ffffff; border-radius: 12px; padding: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); border: 1px solid #e2e8f0;">
+  <h2 style="margin-top:0; font-size: 18px; color: #0f172a; text-align: center;">Fridge Status Monitor</h2>
+
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px;">
+    <div style="background: #f1f5f9; padding: 16px; border-radius: 8px; text-align: center;">
+      <div style="font-size: 12px; color: #64748b; font-weight: 600; text-transform: uppercase;">Products</div>
+      <div id="val_products" style="font-size: 28px; font-weight: 700; color: #2563eb; margin-top: 4px;">--</div>
+    </div>
+    <div style="background: #f1f5f9; padding: 16px; border-radius: 8px; text-align: center;">
+      <div style="font-size: 12px; color: #64748b; font-weight: 600; text-transform: uppercase;">Alerts</div>
+      <div id="val_alerts" style="font-size: 28px; font-weight: 700; color: #ef4444; margin-top: 4px;">--</div>
+    </div>
+  </div>
+
+  <div id="api_status" style="font-size: 12px; color: #64748b; text-align: center; padding: 8px; background: #fafafa; border-radius: 6px; border: 1px dashed #cbd5e1;">
+    Connecting to API...
+  </div>
+</div>
+
+<script>
+var lastProducts = 0;
+var lastAlerts   = 0;
+
+function sendToBoard() {
+  toky.send('products', lastProducts);
+  toky.send('alerts',   lastAlerts);
+}
+
+function fetchFridgeStatus() {
+  fetch('https://web-production-6967a.up.railway.app/api/status?key=monfrigo2026')
+    .then(function(res) {
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return res.json();
+    })
+    .then(function(data) {
+      lastProducts = Math.min(Math.max(0, Math.round(Number(data.products) || 0)), 255);
+      lastAlerts   = Math.min(Math.max(0, Math.round(Number(data.alerts)   || 0)), 255);
+
+      sendToBoard();
+
+      document.getElementById('val_products').textContent = lastProducts;
+      document.getElementById('val_alerts').textContent   = lastAlerts;
+      document.getElementById('api_status').textContent   = 'Last sync: ' + new Date().toLocaleTimeString();
+
+      document.getElementById('tkc_products').value = Math.min(lastProducts, 100);
+      document.getElementById('tkc_alerts').value   = Math.min(lastAlerts,   100);
+    })
+    .catch(function(err) {
+      console.error('API Fetch Error:', err);
+      document.getElementById('api_status').textContent = 'Fetch Error: ' + err.message;
+    });
+}
+
+// Fetch immediately then every 10s
+fetchFridgeStatus();
+setInterval(fetchFridgeStatus, 10000);
+
+// Resend last known values every 5s so the board gets them even if it connects late
+setInterval(sendToBoard, 5000);
+</script>
+
+</body>
+</html>
