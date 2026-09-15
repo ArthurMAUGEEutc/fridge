@@ -4,3 +4,4 @@ fridge.db
 cert.pem
 key.pem
 config.py
+api_key.txt

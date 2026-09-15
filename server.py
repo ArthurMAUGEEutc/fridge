@@ -16,9 +16,15 @@ try:
 except ImportError:
     GEMINI_API_KEY = None
 
-PORT = 8000
+# Read from env so Railway can inject secrets without a config.py
+if not GEMINI_API_KEY:
+    GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+
+API_KEY = os.environ.get("FRIDGE_API_KEY")  # key for /api/status
+
+PORT = int(os.environ.get("PORT", 8000))
 UPC_URL = "https://api.upcitemdb.com/prod/trial/lookup?upc={}"
-GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={}"
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key={}"
 
 
 # ── Gemini shelf-life ──────────────────────────────────────────────────────────
@@ -43,12 +49,20 @@ def get_shelf_life(product_name: str) -> dict:
     )
     try:
         with urllib.request.urlopen(req, timeout=10) as r:
-            data = json.loads(r.read())
+            raw = r.read()
+        print(f"[Gemini] status=200 body={raw[:500]}")
+        data = json.loads(raw)
         text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+        print(f"[Gemini] text={text!r}")
         days = int("".join(filter(str.isdigit, text)))
         suggested = (date.today() + timedelta(days=days)).isoformat()
         return {"days": days, "suggested_expiry": suggested}
+    except urllib.error.HTTPError as e:
+        body = e.read().decode()
+        print(f"[Gemini] HTTP {e.code} — {body}")
+        return {"error": f"HTTP {e.code}: {body}"}
     except Exception as e:
+        print(f"[Gemini] Exception: {e}")
         return {"error": str(e)}
 
 
@@ -126,6 +140,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return
             self._json(200, get_shelf_life(name))
 
+        elif path == "/api/status":
+            key = qs.get("key", [""])[0]
+            if not API_KEY or key != API_KEY:
+                self._json(401, {"error": "unauthorized"})
+                return
+            db.refresh_statuses()
+            products = db.list_products(include_thrown=False)
+            alerts = db.get_alerts()
+            self._json(200, {
+                "products": len(products),
+                "alerts": len(alerts),
+            })
+
         else:
             self._send(404, "text/plain", b"Not found")
 
@@ -194,21 +221,25 @@ class Handler(http.server.BaseHTTPRequestHandler):
 # ── Entry point ────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    import ssl
     server = http.server.HTTPServer(("0.0.0.0", PORT), Handler)
+
+    # Local dev: wrap with SSL if cert/key present (required for iPhone camera)
     cert = os.path.join(os.path.dirname(__file__), "cert.pem")
     key  = os.path.join(os.path.dirname(__file__), "key.pem")
     if os.path.exists(cert) and os.path.exists(key):
+        import ssl
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         ctx.load_cert_chain(cert, key)
         server.socket = ctx.wrap_socket(server.socket, server_side=True)
         proto = "https"
     else:
         proto = "http"
-    ip = os.popen("ipconfig getifaddr en0 || ipconfig getifaddr en1").read().strip()
+
+    ip = os.popen("ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null").read().strip()
     print(f"FridgeTracker running on:")
     print(f"  Local  → {proto}://localhost:{PORT}")
-    print(f"  Réseau → {proto}://{ip}:{PORT}")
+    if ip:
+        print(f"  Network → {proto}://{ip}:{PORT}")
     print(f"  DB     → {os.path.abspath(db.DB_PATH)}")
     try:
         server.serve_forever()
