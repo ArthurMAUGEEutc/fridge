@@ -269,12 +269,22 @@
 
   function flipCamera() {
     if (allDevices.length < 2) return;
+
+    // Stop existing stream manually (required on iOS Safari)
+    const video = document.getElementById("video");
+    if (video.srcObject) {
+      video.srcObject.getTracks().forEach(t => t.stop());
+      video.srcObject = null;
+    }
     codeReader.reset();
+
     currentDeviceIndex = (currentDeviceIndex + 1) % allDevices.length;
     const id = allDevices[currentDeviceIndex].deviceId;
-    codeReader.decodeFromVideoDevice(id, "video", (result) => {
-      if (result && isScanning) onScan(result.getText());
-    });
+    setTimeout(() => {
+      codeReader.decodeFromVideoDevice(id, "video", (result) => {
+        if (result && isScanning) onScan(result.getText());
+      });
+    }, 300); // small delay so iOS releases the camera properly
   }
 
   function onScan(barcode) {
