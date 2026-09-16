@@ -512,7 +512,7 @@
     const actions = p.status !== "thrown"
       ? `<div class="item-actions">
            ${!p.opened_at ? `<button class="btn btn-secondary btn-sm" onclick="markOpened('${p.barcode}')">Open</button>` : ""}
-           <button class="btn btn-danger btn-sm" onclick="markThrown('${p.barcode}')">Throw</button>
+           <button class="btn btn-danger btn-sm" onclick="markThrown('${p.barcode}')">Consume</button>
          </div>`
       : `<div style="font-size:11px;color:#475569;">Thrown ${(p.thrown_at||"").split("T")[0]}</div>`;
 
