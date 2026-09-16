@@ -511,8 +511,8 @@
       : `<div style="width:44px;height:44px;background:#1e293b;border-radius:6px;"></div>`;
     const actions = p.status !== "thrown"
       ? `<div class="item-actions">
-           ${!p.opened_at ? `<button class="btn btn-secondary btn-sm" onclick="markOpened('${p.barcode}')">Opened</button>` : ""}
-           <button class="btn btn-danger btn-sm" onclick="markThrown('${p.barcode}')">Thrown</button>
+           ${!p.opened_at ? `<button class="btn btn-secondary btn-sm" onclick="markOpened('${p.barcode}')">Open</button>` : ""}
+           <button class="btn btn-danger btn-sm" onclick="markThrown('${p.barcode}')">Throw</button>
          </div>`
       : `<div style="font-size:11px;color:#475569;">Thrown ${(p.thrown_at||"").split("T")[0]}</div>`;
 
