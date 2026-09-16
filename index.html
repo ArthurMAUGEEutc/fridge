@@ -114,7 +114,10 @@
 <div class="view active" id="view-scan">
 
   <div class="card">
-    <div class="status-bar"><div class="dot"></div><span id="camStatus">Starting camera…</span></div>
+    <div class="status-bar" style="justify-content:space-between;">
+      <div style="display:flex;align-items:center;gap:6px;"><div class="dot"></div><span id="camStatus">Starting camera…</span></div>
+      <button class="btn btn-secondary btn-sm" onclick="flipCamera()" style="padding:5px 10px;font-size:11px;">⟳ Flip</button>
+    </div>
     <div class="scanner-box">
       <video id="video" playsinline muted></video>
       <div class="overlay">
@@ -231,6 +234,8 @@
   }
 
   // ── Scanner ────────────────────────────────────────────────────────────────
+  let currentFacing = "environment"; // start with rear camera
+
   document.addEventListener("DOMContentLoaded", () => {
     if (typeof ZXing !== "undefined") {
       codeReader = new ZXing.BrowserMultiFormatReader();
@@ -243,16 +248,33 @@
 
   function startScanner() {
     if (!codeReader) return;
-    codeReader.listVideoInputDevices().then(devices => {
-      const rear = devices.find(d => /back|environment|rear/i.test(d.label));
-      const id = rear ? rear.deviceId : (devices[0] && devices[0].deviceId);
-      codeReader.decodeFromVideoDevice(id, "video", (result) => {
+    // Use facingMode constraint — works reliably on iOS Safari
+    const hints = new Map();
+    const formats = [
+      ZXing.BarcodeFormat.EAN_13, ZXing.BarcodeFormat.EAN_8,
+      ZXing.BarcodeFormat.QR_CODE, ZXing.BarcodeFormat.CODE_128,
+      ZXing.BarcodeFormat.UPC_A, ZXing.BarcodeFormat.UPC_E,
+    ];
+    hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, formats);
+    codeReader = new ZXing.BrowserMultiFormatReader(hints);
+
+    codeReader.decodeFromConstraints(
+      { video: { facingMode: { ideal: currentFacing } } },
+      "video",
+      (result, err) => {
         if (result && isScanning) onScan(result.getText());
-      });
+      }
+    ).then(() => {
       document.getElementById("camStatus").textContent = "Camera active";
     }).catch(() => {
       document.getElementById("camStatus").textContent = "Camera error";
     });
+  }
+
+  function flipCamera() {
+    currentFacing = currentFacing === "environment" ? "user" : "environment";
+    codeReader.reset();
+    startScanner();
   }
 
   function onScan(barcode) {
