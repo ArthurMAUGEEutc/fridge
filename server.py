@@ -71,6 +71,11 @@ def get_shelf_life(product_name: str) -> dict:
 # ── UPCitemdb lookup ───────────────────────────────────────────────────────────
 
 def lookup(barcode: str) -> dict:
+    # Check local cache first
+    if barcode in db.BARCODE_CACHE:
+        p = db.BARCODE_CACHE[barcode]
+        return {"barcode": barcode, "name": p["name"], "brand": p["brand"], "image_url": p["image_url"]}
+
     req = urllib.request.Request(
         OFF_URL.format(barcode),
         headers={"User-Agent": "FridgeTracker/1.0"}

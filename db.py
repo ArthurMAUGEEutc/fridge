@@ -11,6 +11,10 @@ def connect():
     return conn
 
 
+BARCODE_CACHE = {
+    "6937003704014": {"name": "Chinese Fanta", "brand": "Fanta", "image_url": ""},
+}
+
 def init():
     with connect() as conn:
         conn.execute("""
